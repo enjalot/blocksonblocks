@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+  <head>
+    <meta charset="utf-8">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crossfilter/1.3.12/crossfilter.js"></script>
+    <script src="grid.js"></script>
+
+    <style id="loading">
+    .count::after {
+      content: "...";
+    }
+    </style>
+
+    <style>
+      body {
+        font-family: Open Sans;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      section {
+        padding: 10px 0;
+      }
+
+      .count {
+        color: #151;
+        font-weight: bold;
+        font-family: Roboto;
+        border-bottom: 1px solid #ededed;
+      }
+      .italic {
+        font-weight: lighter;
+        font-style: italic;
+      }
+      .callout {
+        font-family: Courier new;
+        background-color: #efefef;
+        padding: 1px 3px;
+        margin: 0px 2px;
+        border-radius: 3px;
+      }
+
+      #data {
+        position:relative;
+        height: 300px;
+      }
+      #data-types {
+        position:relative;
+        width: 300px;
+        float:left;
+      }
+      #user-filter {
+        float:left;
+        width: 300px;
+
+      }
+      #data-heatmap {
+        position: relative;
+        min-height: 160px;
+        float:left;
+        clear:left;
+      }
+      #data-heatmap .block {
+        position:absolute;
+        text-decoration: none;
+        line-height: 9px;
+      }
+      #data-heatmap-hover {
+        margin-top:10px;
+        font-size: 10px;
+        height: 12px;
+        float:right;
+        clear:left;
+      }
+    </style>
+  </head>
+
+  <body>
+  <h1>Blocks on Blocks on Blocks</h1>
+
+  <section>
+    We've collected data for <span class="total-count count"></span> public blocks made by <span class="user-count count"></span> users.
+    These blocks use <span class="api-count count"></span> API functions, including the core as well as plugins.
+    There are <span class="tabular-count count"></span> blocks with <span class="callout">.csv</span> or <span class="callout">.tsv</span> files. 
+    There are <span class="json-count count"></span> blocks with at least one <span class="callout">.json</span> file.
+
+  </section>
+
+  <section>
+    <h2>DATA</h2>
+    Let's take a look at the data files that have been uploaded to blocks.
+    <div id="data">
+      <div id="data-types"></div>
+      <div id="user-filter"><input placeholder="GitHub username"></div>
+      <div id="top-users"></div>
+      <div id="special-datasets"></div>
+      <div id="data-heatmap"></div>
+      <div id="data-heatmap-hover"></div>
+    </div>
+
+    <h3>TABULAR</h3>
+
+    <h3>JSON</h3>
+
+  </section>
+
+  <section>
+    <h2>CODE</h2>
+    We can learn some things about what kind of examples people are creating by examining the code. Some caveats are that we can't know if somebody included a library file, or wrote all the code in the example from scratch.
+    <h3>API FUNCTIONS</h3>
+    API functions are parsed both and plugin functions that follow the <span class="callout">d3.<span class="italic">*</span>(</span> pattern.
+
+    <h3>COLOR</h3>
+    We can see what kind of custom colors people are hard-coding into their code. We won't catch things like usage of <span class="callout">d3.category20()</span>.
+
+
+  </section>
+
+  <section>
+  <h3>Thanks</h3>
+  Irene Ross - block-scanner and blocksplorer
+  <br>
+  Shirley Wu - API explorer
+
+  </section>
+
+  <script>
+    var filtered;
+    d3.json("data/blocks.json", function(err, blocks) {
+    //d3.json("data/files-blocks.json", function(err, files) {
+      d3.select("#loading").text("")
+
+      console.log("blocks", blocks)
+
+      var xf = crossfilter(blocks);
+      var author = xf.dimension(function(d) { return d.owner.login })
+      var created = xf.dimension(function(d) { return +new Date(d.created_at) })
+      var all = xf.dimension(function(d) { return true });
+      var thumb = xf.dimension(function(d) { return !!d.thumbnail });
+      var files = xf.dimension(function(d) {
+        return d.files
+      })
+      /*
+      // we could also filter files down by types, but this doesn't account
+      // for blocks that have multiple files of the same type
+      var filexf = crossfilter(files)
+      var filetype = filexf.dimension(function(d) {
+        ext = d.fileName.split(".")[d.fileName.split(".").length-1];
+        return ext;
+      })
+      var test = filetype.group().all()
+      test.sort(function(a,b) {
+        return b.value - a.value;
+      })
+      */
+ 
+
+      // ----------------------------------------------------------------------
+      // Total
+      // ----------------------------------------------------------------------
+      d3.select(".total-count").text(blocks.length)
+
+      // ----------------------------------------------------------------------
+      // Users
+      // ----------------------------------------------------------------------
+      var users = author.group().all().sort(function(a,b) { return b.value - a.value })
+      console.log("users", users)
+      d3.select(".user-count").text(users.length)
+
+      // ----------------------------------------------------------------------
+      // API functions 
+      // ----------------------------------------------------------------------
+      var functions = {}
+      blocks.forEach(function(d) {
+        if(!d.api) return;
+        var fns = Object.keys(d.api)
+        fns.forEach(function(fn) {
+          if(!functions[fn]) functions[fn] = 0;
+          functions[fn]++;
+        })
+      })
+      var fns = [];
+      var functionNames = Object.keys(functions);
+      functionNames.forEach(function(fn) {
+        fns.push({name: fn, count: functions[fn] })
+      })
+      fns.sort(function(a,b) { return b.count - a.count });
+
+      d3.select(".api-count").text(fns.length)
+      console.log("functions", fns)
+
+
+
+      // ----------------------------------------------------------------------
+      // Files
+      // ----------------------------------------------------------------------
+
+      var blocksByFiletype = getBlocksByFiletype(all.top(Infinity))
+      var typeCounts = {}
+      blocksByFiletype.forEach(function(type) {
+        typeCounts[type.key] = type.values;
+      })
+      console.log("files", blocksByFiletype.length, typeCounts)
+
+      filtered = function() {
+        blocksByFiletype = getBlocksByFiletype(all.top(Infinity))
+        typeCounts = {}
+        blocksByFiletype.forEach(function(type) {
+          typeCounts[type.key] = type.values;
+        })
+
+        renderTypes();
+      }
+
+
+      d3.select(".tabular-count").text(typeCounts["csv"] + typeCounts["tsv"])
+      d3.select(".json-count").text(typeCounts["json"])
+
+
+      // ----------------------------------------------------------------------
+      // Data
+      // ----------------------------------------------------------------------
+
+      // ----------------------------------------------------------------------
+      // Data file types
+      // ----------------------------------------------------------------------
+      var svgDTypes = d3.select("#data-types").append("svg")
+      .attr({
+        width: 200, height: 80
+      })
+
+      var types = ["csv", "tsv", "json"]
+      var typescale = d3.scale.linear()
+        .domain([0, d3.max(types, function(d) { return typeCounts[d] })])
+        .range([0, 200])
+
+      
+      function renderTypes() {
+        var rects = svgDTypes.selectAll("rect").data(types)
+        rects.enter().append("rect")
+        rects.attr({
+          x: 0,
+          height: 20,
+          y: function(d,i) { return i * (20 + 5) },
+          width: function(d) { return typescale(typeCounts[d])}
+        }).style({
+          fill: "#efefef",
+          stroke: "#eaeaea",
+
+        })
+        var typeLabels = svgDTypes.selectAll("text").data(types)
+        typeLabels
+        .enter().append("text")
+        .attr({
+          x: 10,
+          y: function(d,i) { return i * (20 + 5) + 10},
+          "alignment-baseline": "middle",
+          "font-size": "10px",
+          "pointer-events": "none"
+        })
+        
+        typeLabels.text(function(d) { return d + ": " + (typeCounts[d] || 0) })
+      }
+
+      renderTypes();
+
+      // ----------------------------------------------------------------------
+      // Data heatmap
+      // ----------------------------------------------------------------------
+      var cw = 5;
+      var ch = 4;
+      var layout = new grid()
+        .cellWidth(cw)
+        .cellHeight(ch)
+        .width(950)
+        .margin([1, 1])
+        //.offset([0, 28])
+        .brick(true)
+
+      var dataHeatmap = layout.nodes(created.top(Infinity));
+      var blockdivs = d3.select("#data-heatmap").selectAll("div.block")
+        .data(dataHeatmap)
+        .enter()
+        .append("div").classed("block", true)
+        .style({
+          top: function(d) { return d.y  + "px" },
+          left: function(d) { return d.x  + "px" },
+          width: cw + "px",
+          height: ch + "px",
+          "background-color": function(d,i) {
+            return "#e1e1e1"
+            //return color(i);
+          }
+        }).on("click", function(d,i) {
+          console.log(d);
+          window.open("http://bl.ocks.org/" + d.data.owner.login + "/" + d.data.id);
+        })
+        .on("mouseover", function(d,i) {
+          // select
+          var desc = d.data.description || "";
+          desc = desc.slice(0, 40);
+          if(d3.select(this).style("opacity") == 1)
+            d3.select("#data-heatmap-hover").text(desc + " by: " + d.data.owner.login)
+        })
+        
+        //filter the heatmap whenever we type a user name
+        d3.select("#user-filter input").on("keydown", function() {
+          var that = this;
+          setTimeout(function() {
+            var val = that.value.toLowerCase();
+            d3.select("#data-heatmap-hover").text("");
+            author.filter(function(d) { 
+              return d.toLowerCase().indexOf(val) >= 0;
+            })
+            filtered();
+            var matched = author.top(Infinity)
+            var ids = matched.map(function(d) { return d.id });
+            
+            d3.select("#data-heatmap").selectAll("div.block")
+            .transition().duration(400)
+            .style("opacity", 0.1)
+            
+            var filteredSel = d3.select("#data-heatmap").selectAll("div.block")
+            .filter(function(d) { return ids.indexOf(d.data.id) >= 0 })
+            .transition().duration(100)
+            .style("opacity", 1)
+            
+          }, 10);
+          
+        })
+
+        // filter the heatmap when hovering one of the file type rects
+        d3.selectAll("#data-types rect").on("mouseover", function(d) {
+          d3.select("#data-heatmap-hover").text("");
+            all.filter(function(d) { 
+              return d.toLowerCase().indexOf(val) >= 0;
+            })
+            filtered();
+            var matched = author.top(Infinity)
+            var ids = matched.map(function(d) { return d.id });
+            
+            d3.select("#data-heatmap").selectAll("div.block")
+            .transition().duration(400)
+            .style("opacity", 0.1)
+            
+            var filteredSel = d3.select("#data-heatmap").selectAll("div.block")
+            .filter(function(d) { return ids.indexOf(d.data.id) >= 0 })
+            .transition().duration(100)
+            .style("opacity", 1)
+        })
+
+   //})
+   })
+
+
+
+
+
+
+
+
+
+
+// we use d3.nest to aggregate unique blocks per filetype
+function getBlocksByFiletype(data) {
+  var theseFiles = []
+  data.forEach(function(gist) {
+    var fileNames = Object.keys(gist.files)
+    fileNames.forEach(function(fileName) {
+      file = gist.files[fileName]
+      var pruned = {
+        gistId: gist.id,
+        userId: gist.userId,
+        description: gist.description,
+        created_at: gist.created_at,
+        updated_at: gist.updated_at,
+        fileName: fileName,
+        file: file
+      }
+      theseFiles.push(pruned)
+    })
+  })
+
+  var nestedFiles = d3.nest()
+  .key(function(d) {
+    ext = d.fileName.split(".")[d.fileName.split(".").length-1];
+    return ext;
+  })
+  .rollup(function(leaves) {
+    //return count of unique blocks
+    var unique = {}
+    leaves.forEach(function(d){
+      unique[d.gistId] = 1
+    })
+    return Object.keys(unique).length
+  })
+  .entries(theseFiles)
+
+  return nestedFiles.sort(function(a,b) { 
+    return b.values - a.values;
+  })
+}
+
+</script>
+  </body>
